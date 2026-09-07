@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1117">
+<title>インターバルタイマー</title>
+<style>
+  :root{
+    --bg:#0f1117;
+    --panel:#181b24;
+    --panel2:#1f232e;
+    --line:#2c313e;
+    --text:#e8ebf2;
+    --muted:#98a0b3;
+    --accent:#f0b23a;          /* 現在フェーズ色（JSで差し替え） */
+    --accent-dim:#f0b23a33;
+    --prepare:#f0b23a;
+    --work:#ff4d4f;
+    --rest:#22b8cf;
+    --roundrest:#8b5cf6;
+    --done:#3ddc84;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic UI",Meiryo,sans-serif;
+    display:flex;flex-direction:column;align-items:center;
+    padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    overflow-x:hidden;
+  }
+  .wrap{width:100%;max-width:520px;padding:16px 16px 32px;flex:1;display:flex;flex-direction:column}
+  h1{font-size:1.05rem;font-weight:700;letter-spacing:.04em;margin:4px 0 16px;color:var(--muted);text-align:center}
+
+  /* ---------- 共通パーツ ---------- */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:.78rem;font-weight:700;color:var(--muted);letter-spacing:.08em;margin:0 0 10px;text-transform:uppercase}
+  .row{display:flex;align-items:center;gap:10px;padding:7px 0}
+  .row+.row{border-top:1px solid var(--line)}
+  .row .label{flex:1;min-width:0}
+  .row .label b{display:block;font-size:.95rem;font-weight:600}
+  .row .label span{display:block;font-size:.72rem;color:var(--muted);margin-top:2px}
+  .row.dim{opacity:.4}
+  .stepper{display:flex;align-items:center;gap:6px;flex:none}
+  .stepper button{
+    width:38px;height:38px;flex:none;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--text);font-size:1.25rem;line-height:1;cursor:pointer;
+  }
+  .stepper button:active{background:#2b3040}
+  .stepper input{
+    width:64px;height:38px;text-align:center;font-size:1.05rem;font-weight:700;
+    background:#12151d;color:var(--text);border:1px solid var(--line);border-radius:10px;
+    -moz-appearance:textfield;
+  }
+  .stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .unit{font-size:.75rem;color:var(--muted);width:16px;flex:none}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    border:1px solid var(--line);background:var(--panel2);color:var(--text);
+    border-radius:12px;padding:11px 14px;font-size:.92rem;font-weight:600;cursor:pointer;
+  }
+  .btn:active{transform:scale(.98)}
+  .btn.primary{background:var(--accent);border-color:transparent;color:#10131a;font-weight:800}
+  .btn.wide{width:100%;padding:16px;font-size:1.05rem;border-radius:14px}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.35;cursor:default}
+
+  .toggles{display:flex;flex-wrap:wrap;gap:8px}
+  .toggle{
+    display:inline-flex;align-items:center;gap:7px;padding:9px 12px;border-radius:999px;
+    background:var(--panel2);border:1px solid var(--line);font-size:.85rem;cursor:pointer;user-select:none;
+  }
+  .toggle input{accent-color:var(--accent);width:16px;height:16px;margin:0}
+
+  .summary{display:flex;gap:8px;margin-bottom:12px}
+  .summary div{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
+  .summary b{display:block;font-size:1.15rem;font-variant-numeric:tabular-nums}
+  .summary span{font-size:.68rem;color:var(--muted)}
+
+  .plan{font-size:.76rem;color:var(--muted);line-height:1.7;word-break:break-word}
+  .plan em{color:var(--text);font-style:normal;font-weight:600}
+
+  .presetbar{display:flex;gap:8px}
+  .presetbar select,.presetbar input[type=text]{
+    flex:1;min-width:0;height:40px;background:#12151d;color:var(--text);
+    border:1px solid var(--line);border-radius:10px;padding:0 10px;font-size:.88rem;
+  }
+
+  /* ---------- 実行画面 ---------- */
+  #runner{display:none;flex:1;flex-direction:column}
+  #runner.on{display:flex}
+  #settings.off{display:none}
+
+  .phase-name{
+    text-align:center;font-size:1.5rem;font-weight:800;letter-spacing:.06em;
+    color:var(--accent);margin:2px 0 2px;
+  }
+  .meta{text-align:center;font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums}
+  .ringwrap{position:relative;width:100%;max-width:340px;margin:10px auto 4px;aspect-ratio:1/1}
+  .ringwrap svg{width:100%;height:100%;transform:rotate(-90deg)}
+  .ring-bg{fill:none;stroke:#232834;stroke-width:9}
+  .ring-fg{fill:none;stroke:var(--accent);stroke-width:9;stroke-linecap:round;transition:stroke .3s}
+  .center{
+    position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  }
+  .big{
+    font-size:clamp(3.6rem,20vw,6.4rem);font-weight:800;line-height:1;
+    font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+  }
+  .big.warn{color:var(--accent)}
+  .sub{font-size:.8rem;color:var(--muted);margin-top:8px;text-align:center;padding:0 12px}
+  .overall{height:6px;background:#232834;border-radius:99px;overflow:hidden;margin:14px 0 6px}
+  .overall i{display:block;height:100%;background:var(--accent);width:0;border-radius:99px;transition:width .2s linear}
+  .overall-label{display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted);font-variant-numeric:tabular-nums}
+
+  .controls{display:flex;gap:8px;margin-top:auto;padding-top:16px}
+  .controls .btn{flex:1}
+  .controls .btn.big{flex:1.6;padding:18px 10px;font-size:1.05rem}
+  .controls2{display:flex;gap:8px;margin-top:8px}
+  .controls2 .btn{flex:1}
+
+  body.paused .big{opacity:.45}
+  .badge{
+    display:inline-block;font-size:.7rem;padding:3px 10px;border-radius:99px;
+    background:var(--accent-dim);color:var(--accent);font-weight:700;letter-spacing:.08em;
+  }
+  .hint{font-size:.68rem;color:#6b7285;text-align:center;margin-top:14px;line-height:1.6}
+  .note{font-size:.68rem;color:#6b7285;line-height:1.7;margin:10px 0 0}
+  .note b{color:var(--muted)}
+  #voiceBox{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+  .rangerow{display:flex;align-items:center;gap:10px}
+  .rangerow b{font-size:.82rem;color:var(--muted);flex:none}
+  .rangerow input[type=range]{flex:1;min-width:0;accent-color:var(--accent)}
+  .rangerow span{font-size:.75rem;color:var(--muted);width:32px;text-align:right;flex:none;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>INTERVAL TIMER</h1>
+
+  <!-- ============ 設定画面 ============ -->
+  <section id="settings">
+    <div class="summary">
+      <div><b id="sumTotal">--:--</b><span>合計時間</span></div>
+      <div><b id="sumSets">-</b><span>総セット数</span></div>
+      <div><b id="sumWork">--:--</b><span>実トレ時間</span></div>
+    </div>
+
+    <div class="card">
+      <h2>タイマー設定</h2>
+      <div class="row" data-row="prepare">
+        <div class="label"><b>準備</b><span>ストレッチ・準備運動</span></div>
+        <div class="stepper">
+          <button type="button" data-step="prepare:-">−</button>
+          <input id="prepare" type="number" inputmode="numeric" value="20">
+          <button type="button" data-step="prepare:+">＋</button>
+        </div><div class="unit">秒</div>
+      </div>
+      <div class="row" data-row="work">
+        <div class="label"><b>トレーニング</b><span>1セットあたり</span></div>
+        <div class="stepper">
+          <button type="button" data-step="work:-">−</button>
+          <input id="work" type="number" inputmode="numeric" value="30">
+          <button type="button" data-step="work:+">＋</button>
+        </div><div class="unit">秒</div>
+      </div>
+      <div class="row" data-row="rest">
+        <div class="label"><b>インターバル</b><span>セット間の休憩</span></div>
+        <div class="stepper">
+          <button type="button" data-step="rest:-">−</button>
+          <input id="rest" type="number" inputmode="numeric" value="15">
+          <button type="button" data-step="rest:+">＋</button>
+        </div><div class="unit">秒</div>
+      </div>
+      <div class="row" data-row="sets">
+        <div class="label"><b>セット数</b><span>1ラウンドの繰り返し回数</span></div>
+        <div class="stepper">
+          <button type="button" data-step="sets:-">−</button>
+          <input id="sets" type="number" inputmode="numeric" value="8">
+          <button type="button" data-step="sets:+">＋</button>
+        </div><div class="unit">回</div>
+      </div>
+      <div class="row" data-row="rounds">
+        <div class="label"><b>ラウンド数</b><span>上記セット群の繰り返し</span></div>
+        <div class="stepper">
+          <button type="button" data-step="rounds:-">−</button>
+          <input id="rounds" type="number" inputmode="numeric" value="1">
+          <button type="button" data-step="rounds:+">＋</button>
+        </div><div class="unit">回</div>
+      </div>
+      <div class="row" data-row="roundRest">
+        <div class="label"><b>ラウンド休憩</b><span>ラウンド間の長い休憩</span></div>
+        <div class="stepper">
+          <button type="button" data-step="roundRest:-">−</button>
+          <input id="roundRest" type="number" inputmode="numeric" value="60">
+          <button type="button" data-step="roundRest:+">＋</button>
+        </div><div class="unit">秒</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>進行イメージ</h2>
+      <div class="plan" id="plan"></div>
+    </div>
+
+    <div class="card">
+      <h2>合図・動作</h2>
+      <div class="toggles">
+        <label class="toggle"><input type="checkbox" id="optBeep" checked>ビープ音</label>
+        <label class="toggle"><input type="checkbox" id="optVoice" checked>音声読み上げ</label>
+        <label class="toggle"><input type="checkbox" id="optWake" checked>スリープ防止</label>
+        <button class="btn ghost" type="button" id="testCue" style="padding:9px 12px;border-radius:999px;font-size:.85rem">🔔 ビープ試聴</button>
+      </div>
+
+      <div id="voiceBox">
+        <div class="presetbar" style="margin-bottom:10px">
+          <select id="voiceSel"></select>
+          <button class="btn" type="button" id="voiceTest">🔊 試聴</button>
+        </div>
+        <div class="rangerow">
+          <b>速度</b>
+          <input type="range" id="voiceRate" min="0.7" max="1.6" step="0.05" value="1.05">
+          <span id="voiceRateLbl">1.05</span>
+        </div>
+        <label class="toggle" style="margin-top:10px"><input type="checkbox" id="optSetNum">セット番号も読み上げる</label>
+        <p class="note">
+          声の自然さは<b>OS側の音声エンジン依存</b>です。このPCの標準音声（Ayumi / Haruka など）は機械的なので、
+          <b>Microsoft Edge</b> で開くと一覧に「… Online (Natural)」という高品質なニューラル音声が現れます（要ネット接続）。
+          iPhone なら Kyoko の「強化 / プレミアム」音源をダウンロードすると自然になります。
+        </p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>プリセット</h2>
+      <div class="presetbar" style="margin-bottom:8px">
+        <select id="presetList"><option value="">— 保存済みを選択 —</option></select>
+        <button class="btn" type="button" id="presetLoad">読込</button>
+        <button class="btn" type="button" id="presetDel">削除</button>
+      </div>
+      <div class="presetbar">
+        <input type="text" id="presetName" placeholder="プリセット名（例: HIIT 30-15）">
+        <button class="btn" type="button" id="presetSave">保存</button>
+      </div>
+    </div>
+
+    <button class="btn primary wide" id="btnStart">▶ スタート</button>
+    <p class="hint">設定は自動保存されます。<br>スペースキー = 一時停止 / 再開</p>
+  </section>
+
+  <!-- ============ 実行画面 ============ -->
+  <section id="runner">
+    <div style="text-align:center"><span class="badge" id="stateBadge">実行中</span></div>
+    <div class="phase-name" id="phaseName">準備</div>
+    <div class="meta" id="phaseMeta">—</div>
+
+    <div class="ringwrap">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="ring-bg" cx="100" cy="100" r="88"></circle>
+        <circle class="ring-fg" id="ringFg" cx="100" cy="100" r="88"
+                stroke-dasharray="552.92" stroke-dashoffset="0"></circle>
+      </svg>
+      <div class="center">
+        <div class="big" id="bigTime">0</div>
+        <div class="sub" id="nextUp">次: —</div>
+      </div>
+    </div>
+
+    <div class="overall"><i id="overallBar"></i></div>
+    <div class="overall-label"><span id="elapsedLbl">0:00</span><span id="remainLbl">0:00</span></div>
+
+    <div class="controls">
+      <button class="btn" id="btnPrev">⏮ 前</button>
+      <button class="btn primary big" id="btnPause">⏸ 一時停止</button>
+      <button class="btn" id="btnSkip">次 ⏭</button>
+    </div>
+    <div class="controls2">
+      <button class="btn ghost" id="btnStop">■ 終了して設定に戻る</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const $ = id => document.getElementById(id);
+
+  /* ================= 設定 ================= */
+  const SPEC = {
+    prepare:   {def:20, min:0, max:1800, step:5},
+    work:      {def:30, min:1, max:3600, step:5},
+    rest:      {def:15, min:0, max:1800, step:5},
+    sets:      {def:8,  min:1, max:99,   step:1},
+    rounds:    {def:1,  min:1, max:99,   step:1},
+    roundRest: {def:60, min:0, max:3600, step:5}
+  };
+  const KEYS = Object.keys(SPEC);
+  const LS_CFG = 'intervalTimer.cfg.v1';
+  const LS_OPT = 'intervalTimer.opt.v1';
+  const LS_PRE = 'intervalTimer.presets.v1';
+
+  // 読み上げ文は短いほど合成音の不自然さが目立たないため、あえて最短にしている
+  const PHASES = {
+    prepare:   {name:'準備',         color:'var(--prepare)',   voice:'準備'},
+    work:      {name:'トレーニング', color:'var(--work)',      voice:'スタート'},
+    rest:      {name:'インターバル', color:'var(--rest)',      voice:'休憩'},
+    roundRest: {name:'ラウンド休憩', color:'var(--roundrest)', voice:'ラウンド休憩'}
+  };
+
+  function readCfg(){
+    const c = {};
+    KEYS.forEach(k=>{
+      const s = SPEC[k];
+      let v = parseInt($(k).value, 10);
+      if(isNaN(v)) v = s.def;
+      v = Math.min(s.max, Math.max(s.min, v));
+      c[k] = v;
+    });
+    return c;
+  }
+  function writeCfg(c){
+    KEYS.forEach(k=>{ if(typeof c[k] === 'number') $(k).value = c[k]; });
+    refresh();
+  }
+
+  /* ================= スケジュール生成 ================= */
+  // 準備 → [ (トレ → インターバル) ×セット数 → ラウンド休憩 ] ×ラウンド数
+  // ・各ラウンドの最終セット後のインターバルはスキップ
+  // ・最終ラウンド後のラウンド休憩はスキップ
+  function buildSchedule(c){
+    const out = [];
+    if(c.prepare > 0) out.push({type:'prepare', dur:c.prepare});
+    for(let r=1; r<=c.rounds; r++){
+      for(let s=1; s<=c.sets; s++){
+        out.push({type:'work', dur:c.work, set:s, round:r});
+        if(s < c.sets && c.rest > 0) out.push({type:'rest', dur:c.rest, set:s, round:r});
+      }
+      if(r < c.rounds && c.roundRest > 0) out.push({type:'roundRest', dur:c.roundRest, round:r});
+    }
+    return out;
+  }
+
+  const fmt = sec => {
+    sec = Math.max(0, Math.round(sec));
+    const m = Math.floor(sec/60), s = sec%60;
+    return m + ':' + String(s).padStart(2,'0');
+  };
+
+  /* ================= 設定画面の更新 ================= */
+  function refresh(){
+    const c = readCfg();
+    const sch = buildSchedule(c);
+    const total = sch.reduce((a,p)=>a+p.dur, 0);
+    const workTotal = sch.filter(p=>p.type==='work').reduce((a,p)=>a+p.dur,0);
+    $('sumTotal').textContent = fmt(total);
+    $('sumSets').textContent  = c.sets * c.rounds;
+    $('sumWork').textContent  = fmt(workTotal);
+
+    const multi = c.rounds > 1;
+    document.querySelector('[data-row="roundRest"]').classList.toggle('dim', !multi);
+
+    let html = '';
+    if(c.prepare>0) html += '<em>準備 '+c.prepare+'秒</em> → ';
+    html += '( <em>トレ '+c.work+'秒</em>' + (c.rest>0 ? ' → <em>休 '+c.rest+'秒</em>' : '') + ' ) × <em>'+c.sets+'セット</em>';
+    if(multi){
+      html += (c.roundRest>0 ? ' → <em>ラウンド休憩 '+c.roundRest+'秒</em>' : '');
+      html = '<em>' + (c.prepare>0 ? '準備 '+c.prepare+'秒</em> → [ ' : '</em>[ ') +
+             '( <em>トレ '+c.work+'秒</em>' + (c.rest>0 ? ' → <em>休 '+c.rest+'秒</em>' : '') +
+             ' ) ×'+c.sets+' ' + (c.roundRest>0 ? '→ <em>ラウンド休憩 '+c.roundRest+'秒</em> ' : '') +
+             '] × <em>'+c.rounds+'ラウンド</em>';
+    }
+    html += '<br>※ 各ラウンド最終セット後のインターバル、最終ラウンド後のラウンド休憩は自動でスキップされます（全 '+sch.length+' フェーズ）。';
+    $('plan').innerHTML = html;
+
+    try{ localStorage.setItem(LS_CFG, JSON.stringify(c)); }catch(e){}
+  }
+
+  /* ================= 音 ================= */
+  let ac = null;
+  function audioCtx(){
+    if(!ac){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return null;
+      ac = new AC();
+    }
+    if(ac.state === 'suspended') ac.resume();
+    return ac;
+  }
+  function tone(freq, dur, vol, delay){
+    if(!$('optBeep').checked) return;
+    const ctx = audioCtx(); if(!ctx) return;
+    const t0 = ctx.currentTime + (delay||0);
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'sine'; osc.frequency.value = freq;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol==null?0.35:vol, t0+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(t0); osc.stop(t0+dur+0.02);
+  }
+  const cueCountdown = () => tone(880, 0.12, 0.30);
+  function cueStart(type){
+    if(type === 'work'){ tone(1245, 0.16, 0.38); tone(1245, 0.42, 0.38, 0.20); }
+    else if(type === 'prepare'){ tone(700, 0.30, 0.28); }
+    else { tone(660, 0.34, 0.30); }
+  }
+  function cueFinish(){ tone(523,0.22,0.34,0); tone(659,0.22,0.34,0.20); tone(784,0.55,0.36,0.40); }
+
+  let voices = [], curVoice = null, wantVoiceName = '';
+  function populateVoices(){
+    const sel = $('voiceSel');
+    if(!window.speechSynthesis){
+      sel.innerHTML = '<option value="">（このブラウザは読み上げ非対応）</option>';
+      return;
+    }
+    const all = speechSynthesis.getVoices() || [];
+    const ja = all.filter(v=>/^ja/i.test(v.lang));
+    const other = all.filter(v=>!/^ja/i.test(v.lang));
+    voices = ja.concat(other);
+    if(!voices.length){ sel.innerHTML = '<option value="">（音声を読み込み中…）</option>'; return; }
+
+    const mkOpt = v => {
+      const o = document.createElement('option');
+      o.value = v.name;
+      o.textContent = v.name + (v.localService ? '' : ' ⟨オンライン⟩');
+      return o;
+    };
+    sel.innerHTML = '';
+    [['日本語', ja], ['その他の言語', other]].forEach(([label, list])=>{
+      if(!list.length) return;
+      const g = document.createElement('optgroup');
+      g.label = label;
+      list.forEach(v=>g.appendChild(mkOpt(v)));
+      sel.appendChild(g);
+    });
+
+    // 保存済み → オンラインの日本語（Edgeのニューラル音声）→ 日本語 → 先頭 の優先順
+    let pick = voices.find(v=>v.name === wantVoiceName)
+            || ja.find(v=>!v.localService)
+            || ja[0] || voices[0];
+    sel.value = pick.name;
+    curVoice = pick;
+  }
+  if(window.speechSynthesis) speechSynthesis.onvoiceschanged = populateVoices;
+
+  function say(text, force){
+    if(!text || !window.speechSynthesis) return;
+    if(!force && !$('optVoice').checked) return;
+    try{
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = parseFloat($('voiceRate').value) || 1.05;
+      u.pitch = 1.0;
+      u.lang = curVoice ? curVoice.lang : 'ja-JP';
+      if(curVoice) u.voice = curVoice;
+      speechSynthesis.speak(u);
+    }catch(e){}
+  }
+
+  /* ================= スリープ防止 ================= */
+  let wakeLock = null;
+  async function wakeAcquire(){
+    if(!$('optWake').checked || !('wakeLock' in navigator)) return;
+    try{
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', ()=>{ wakeLock = null; });
+    }catch(e){ wakeLock = null; }
+  }
+  function wakeRelease(){
+    if(wakeLock){ try{ wakeLock.release(); }catch(e){} wakeLock = null; }
+  }
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'visible' && T.running && !wakeLock) wakeAcquire();
+  });
+
+  /* ================= タイマー本体 ================= */
+  const RING_C = 552.92;
+  const T = {
+    sch:[], idx:0, running:false, active:false,
+    endAt:0, remainMs:0, lastSec:null, dur:0,
+    cumBefore:[], total:0, finished:false, ticker:null
+  };
+
+  function start(){
+    const c = readCfg();
+    const sch = buildSchedule(c);
+    if(!sch.length) return;
+    T.sch = sch; T.idx = 0; T.finished = false; T.active = true; T.running = true;
+    T.total = sch.reduce((a,p)=>a+p.dur, 0);
+    T.cumBefore = []; let acc = 0;
+    sch.forEach(p=>{ T.cumBefore.push(acc); acc += p.dur; });
+
+    audioCtx();            // ユーザー操作の中で解錠（iOS/Chrome対策）
+    $('settings').classList.add('off');
+    $('runner').classList.add('on');
+    wakeAcquire();
+    enterPhase(0, true);
+    loop();
+    window.scrollTo(0,0);
+  }
+
+  function stop(){
+    T.active = false; T.running = false; T.finished = false;
+    clearInterval(T.ticker); T.ticker = null;
+    wakeRelease();
+    if(window.speechSynthesis) try{ speechSynthesis.cancel(); }catch(e){}
+    document.body.classList.remove('paused');
+    $('runner').classList.remove('on');
+    $('settings').classList.remove('off');
+    setAccent('var(--prepare)');
+  }
+
+  function enterPhase(i, cue){
+    T.idx = i;
+    const p = T.sch[i];
+    T.dur = p.dur * 1000;
+    if(T.running) T.endAt = Date.now() + T.dur;
+    else T.remainMs = T.dur;
+    T.lastSec = null;
+    if(cue !== false){
+      cueStart(p.type);
+      let v = PHASES[p.type].voice;
+      if(p.type === 'work' && $('optSetNum').checked) v = p.set + 'セット目、スタート';
+      say(v);
+    }
+    render();
+  }
+
+  function nextPhase(){
+    if(T.idx + 1 < T.sch.length){ enterPhase(T.idx + 1, true); }
+    else finish();
+  }
+
+  function finish(){
+    T.running = false; T.finished = true;
+    clearInterval(T.ticker); T.ticker = null;
+    wakeRelease();
+    cueFinish();
+    say('終了。お疲れさまでした');
+    document.body.classList.remove('paused');
+    setAccent('var(--done)');
+    $('stateBadge').textContent = '完了';
+    $('phaseName').textContent = '完了！';
+    $('phaseMeta').textContent = '総時間 ' + fmt(T.total);
+    $('bigTime').textContent = '0';
+    $('nextUp').textContent = 'お疲れさまでした 🎉';
+    $('ringFg').setAttribute('stroke-dashoffset', 0);
+    $('overallBar').style.width = '100%';
+    $('elapsedLbl').textContent = fmt(T.total);
+    $('remainLbl').textContent = '0:00';
+    $('btnPause').textContent = '↺ もう一度';
+    $('btnPrev').disabled = true; $('btnSkip').disabled = true;
+  }
+
+  function pause(){
+    if(!T.running) return;
+    T.remainMs = Math.max(0, T.endAt - Date.now());
+    T.running = false;
+    clearInterval(T.ticker); T.ticker = null;
+    wakeRelease();
+    if(window.speechSynthesis) try{ speechSynthesis.cancel(); }catch(e){}
+    document.body.classList.add('paused');
+    render();
+  }
+  function resume(){
+    if(T.running) return;
+    T.endAt = Date.now() + T.remainMs;
+    T.running = true;
+    T.lastSec = null;
+    document.body.classList.remove('paused');
+    audioCtx(); wakeAcquire();
+    loop(); render();
+  }
+  function loop(){
+    clearInterval(T.ticker);
+    T.ticker = setInterval(tick, 100);
+  }
+
+  function tick(){
+    if(!T.running) return;
+    const remain = T.endAt - Date.now();
+    const sec = Math.max(0, Math.ceil(remain/1000));
+    if(sec !== T.lastSec){
+      T.lastSec = sec;
+      if(sec >= 1 && sec <= 3) cueCountdown();
+      render();
+    } else {
+      renderProgress(remain);
+    }
+    if(remain <= 0) nextPhase();
+  }
+
+  function setAccent(color){
+    document.documentElement.style.setProperty('--accent', color);
+  }
+
+  function remainingMs(){
+    return T.running ? Math.max(0, T.endAt - Date.now()) : T.remainMs;
+  }
+
+  function render(){
+    if(!T.active || T.finished) return;
+    const p = T.sch[T.idx], info = PHASES[p.type];
+    const c = readCfg();
+    setAccent(info.color);
+    $('stateBadge').textContent = T.running ? '実行中' : '一時停止中';
+    $('phaseName').textContent = info.name;
+
+    let meta = '';
+    if(p.type === 'work' || p.type === 'rest'){
+      meta = 'セット ' + p.set + ' / ' + c.sets;
+      if(c.rounds > 1) meta += '　·　ラウンド ' + p.round + ' / ' + c.rounds;
+    } else if(p.type === 'roundRest'){
+      meta = 'ラウンド ' + p.round + ' / ' + c.rounds + ' 終了';
+    } else {
+      meta = 'これから始めます';
+    }
+    meta += '　·　フェーズ ' + (T.idx+1) + ' / ' + T.sch.length;
+    $('phaseMeta').textContent = meta;
+
+    const nx = T.sch[T.idx+1];
+    $('nextUp').textContent = nx ? ('次: ' + PHASES[nx.type].name + ' ' + nx.dur + '秒') : '次: これで終了';
+
+    const rem = remainingMs();
+    const sec = Math.max(0, Math.ceil(rem/1000));
+    $('bigTime').textContent = sec >= 60 ? fmt(sec) : String(sec);
+    $('bigTime').classList.toggle('warn', sec <= 3);
+    $('btnPause').textContent = T.running ? '⏸ 一時停止' : '▶ 再開';
+    $('btnPrev').disabled = false;
+    $('btnSkip').disabled = false;
+    renderProgress(rem);
+  }
+
+  function renderProgress(rem){
+    if(!T.active || T.finished) return;
+    if(rem == null) rem = remainingMs();
+    const done = T.dur > 0 ? (1 - rem/T.dur) : 1;
+    $('ringFg').setAttribute('stroke-dashoffset', (RING_C * Math.min(1, Math.max(0, done))).toFixed(2));
+    const elapsedSec = T.cumBefore[T.idx] + (T.dur - rem)/1000;
+    const pct = T.total > 0 ? Math.min(100, elapsedSec / T.total * 100) : 0;
+    $('overallBar').style.width = pct.toFixed(2) + '%';
+    $('elapsedLbl').textContent = fmt(elapsedSec);
+    $('remainLbl').textContent = '−' + fmt(T.total - elapsedSec);
+  }
+
+  /* ================= プリセット ================= */
+  function loadPresets(){
+    try{ return JSON.parse(localStorage.getItem(LS_PRE)) || []; }catch(e){ return []; }
+  }
+  function savePresets(list){
+    try{ localStorage.setItem(LS_PRE, JSON.stringify(list)); }catch(e){}
+  }
+  function renderPresets(sel){
+    const list = loadPresets(), el = $('presetList');
+    el.innerHTML = '<option value="">— 保存済みを選択 —</option>';
+    list.forEach((p,i)=>{
+      const o = document.createElement('option');
+      o.value = String(i); o.textContent = p.name;
+      el.appendChild(o);
+    });
+    if(sel != null) el.value = String(sel);
+  }
+
+  /* ================= イベント ================= */
+  document.querySelectorAll('[data-step]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const [key, dir] = b.dataset.step.split(':');
+      const s = SPEC[key], inp = $(key);
+      let v = parseInt(inp.value,10); if(isNaN(v)) v = s.def;
+      v += (dir === '+' ? s.step : -s.step);
+      inp.value = Math.min(s.max, Math.max(s.min, v));
+      refresh();
+    });
+  });
+  KEYS.forEach(k=>{
+    $(k).addEventListener('input', refresh);
+    $(k).addEventListener('blur', ()=>{
+      const s = SPEC[k]; let v = parseInt($(k).value,10);
+      if(isNaN(v)) v = s.def;
+      $(k).value = Math.min(s.max, Math.max(s.min, v));
+      refresh();
+    });
+  });
+
+  function saveOpt(){
+    try{
+      localStorage.setItem(LS_OPT, JSON.stringify({
+        beep:$('optBeep').checked, voice:$('optVoice').checked, wake:$('optWake').checked,
+        setnum:$('optSetNum').checked, rate:$('voiceRate').value, voiceName:$('voiceSel').value
+      }));
+    }catch(e){}
+  }
+  ['optBeep','optVoice','optWake','optSetNum'].forEach(id=>{
+    $(id).addEventListener('change', ()=>{
+      saveOpt();
+      if(id === 'optWake'){ $(id).checked ? (T.running && wakeAcquire()) : wakeRelease(); }
+      // 読み上げを途中でONにしたときも、この操作を起点に音声エンジンを解錠しておく
+      if(id === 'optVoice' && $(id).checked) say('オン');
+    });
+  });
+  $('voiceSel').addEventListener('change', ()=>{
+    wantVoiceName = $('voiceSel').value;
+    curVoice = voices.find(v=>v.name === wantVoiceName) || null;
+    saveOpt();
+    say('スタート', true);
+  });
+  $('voiceRate').addEventListener('input', ()=>{
+    $('voiceRateLbl').textContent = parseFloat($('voiceRate').value).toFixed(2);
+  });
+  $('voiceRate').addEventListener('change', ()=>{ saveOpt(); say('スタート', true); });
+  $('voiceTest').addEventListener('click', ()=>{
+    say($('optSetNum').checked ? '3セット目、スタート' : 'スタート', true);
+  });
+
+  $('testCue').addEventListener('click', ()=>{ audioCtx(); cueStart('work'); });
+
+  $('btnStart').addEventListener('click', start);
+  $('btnStop').addEventListener('click', stop);
+  $('btnPause').addEventListener('click', ()=>{
+    if(T.finished){ stop(); start(); return; }
+    T.running ? pause() : resume();
+  });
+  $('btnSkip').addEventListener('click', ()=>{
+    if(T.finished) return;
+    if(T.idx + 1 < T.sch.length) enterPhase(T.idx + 1, true); else finish();
+  });
+  $('btnPrev').addEventListener('click', ()=>{
+    if(T.finished) return;
+    // 3秒以上経過していれば現フェーズの頭に戻す。それより前なら1つ前へ。
+    const elapsed = T.dur - remainingMs();
+    if(elapsed > 3000 || T.idx === 0) enterPhase(T.idx, true);
+    else enterPhase(T.idx - 1, true);
+  });
+
+  $('presetSave').addEventListener('click', ()=>{
+    const name = ($('presetName').value || '').trim();
+    if(!name){ $('presetName').focus(); return; }
+    const list = loadPresets();
+    const cfg = readCfg();
+    const i = list.findIndex(p=>p.name === name);
+    if(i >= 0) list[i] = {name, cfg}; else list.push({name, cfg});
+    savePresets(list);
+    renderPresets(list.findIndex(p=>p.name === name));
+    $('presetName').value = '';
+  });
+  $('presetLoad').addEventListener('click', ()=>{
+    const v = $('presetList').value; if(v === '') return;
+    const p = loadPresets()[Number(v)]; if(!p) return;
+    writeCfg(p.cfg);
+    $('presetName').value = p.name;
+  });
+  $('presetDel').addEventListener('click', ()=>{
+    const v = $('presetList').value; if(v === '') return;
+    const list = loadPresets();
+    list.splice(Number(v), 1);
+    savePresets(list); renderPresets();
+  });
+
+  document.addEventListener('keydown', e=>{
+    if(/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if(e.code === 'Space'){
+      e.preventDefault();
+      if(!T.active) start();
+      else if(T.finished){ stop(); start(); }
+      else T.running ? pause() : resume();
+    } else if(e.key === 'ArrowRight' && T.active && !T.finished){ $('btnSkip').click(); }
+    else if(e.key === 'ArrowLeft' && T.active && !T.finished){ $('btnPrev').click(); }
+    else if((e.key === 'Escape') && T.active){ stop(); }
+  });
+
+  /* ================= 起動時の復元 ================= */
+  (function init(){
+    try{
+      const c = JSON.parse(localStorage.getItem(LS_CFG));
+      if(c) KEYS.forEach(k=>{ if(typeof c[k] === 'number') $(k).value = c[k]; });
+    }catch(e){}
+    try{
+      const o = JSON.parse(localStorage.getItem(LS_OPT));
+      if(o){
+        $('optBeep').checked   = o.beep  !== false;
+        $('optVoice').checked  = o.voice !== false;
+        $('optWake').checked   = o.wake  !== false;
+        $('optSetNum').checked = o.setnum === true;
+        if(o.rate) $('voiceRate').value = o.rate;
+        if(o.voiceName) wantVoiceName = o.voiceName;
+      }
+    }catch(e){}
+    $('voiceRateLbl').textContent = parseFloat($('voiceRate').value).toFixed(2);
+    populateVoices();
+    // 一部ブラウザは voiceschanged が来ないため、遅延で再取得
+    setTimeout(populateVoices, 300);
+    setTimeout(populateVoices, 1200);
+    renderPresets();
+    refresh();
+  })();
+})();
+</script>
+</body>
+</html>
